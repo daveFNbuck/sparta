@@ -1,17 +1,23 @@
 require 'impala'
 require 'json'
+require 'mustache'
 require 'mysql2'
 require 'sinatra'
 require 'sinatra/activerecord'
 require 'yaml'
 
 require './environments'
+require './parameters'
 
 DB_CONFIGS = YAML.load_file("database.yml")
 
 class Chart < ActiveRecord::Base
 
-  def get_json_data
+  def full_query params
+    Mustache.render(self.sql_query, params)
+  end
+
+  def get_json_data params
     db_config = DB_CONFIGS[self.database]
 
     if db_config["adapter"] == "mysql2"
@@ -23,14 +29,19 @@ class Chart < ActiveRecord::Base
         :port => db_config["port"],
       )
 
-      return mysql_client.query(self.sql_query).to_a.to_json
+      return mysql_client.query(self.full_query(params)).to_a.to_json
     elsif db_config["adapter"] == "impala"
       data = Impala.connect(db_config["host"], db_config["port"], {:user => db_config["username"]}) do |conn|
-        conn.query(self.sql_query)
+        conn.query(self.full_query(params))
       end
 
       return data.to_json
     end
+  end
+
+  def control_params
+    tokens = Mustache::Template.new(self.sql_query).tokens
+    tokens.find_all { |token| token.is_a?(Array) && token[0] == :mustache }.map{|token| token[2][2]}.flatten
   end
 
 end
@@ -53,11 +64,16 @@ end
 
 get '/charts/:id' do
   @chart = Chart.find(params[:id])
+
+  needed_params = @chart.control_params
+  param_values = parameter_defaults.update(params)
+  @control_params = parameters.keep_if { |param| needed_params.include?(param["name"]) }.
+    map { |param| param.update({"value" => param_values[param["name"]]}) }
   @has_data_error = false
   @data_error_message = ""
   @data = []
   begin
-    @data = @chart.get_json_data
+    @data = @chart.get_json_data(parameter_defaults.update(params))
   rescue Exception => e
     @data_error = true
     @data_error_message = e.message
