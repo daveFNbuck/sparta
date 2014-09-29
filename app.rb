@@ -13,11 +13,11 @@ DB_CONFIGS = YAML.load_file("database.yml")
 
 class Chart < ActiveRecord::Base
 
-  def full_query params
+  def full_query(params)
     Mustache.render(self.sql_query, params)
   end
 
-  def get_json_data params
+  def get_json_data(params)
     db_config = DB_CONFIGS[self.database]
 
     if db_config["adapter"] == "mysql2"
@@ -66,14 +66,14 @@ get '/charts/:id' do
   @chart = Chart.find(params[:id])
 
   needed_params = @chart.control_params
-  param_values = parameter_defaults.update(params)
-  @control_params = parameters.keep_if { |param| needed_params.include?(param["name"]) }.
+  param_values = Parameters.defaults.update(params)
+  @control_params = Parameters.values.keep_if { |param| needed_params.include?(param["name"]) }.
     map { |param| param.update({"value" => param_values[param["name"]]}) }
   @has_data_error = false
   @data_error_message = ""
   @data = []
   begin
-    @data = @chart.get_json_data(parameter_defaults.update(params))
+    @data = @chart.get_json_data(Parameters.defaults.update(params))
   rescue Exception => e
     @data_error = true
     @data_error_message = e.message
